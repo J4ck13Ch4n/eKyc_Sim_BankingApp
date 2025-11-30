@@ -2,25 +2,26 @@ package com.example.ekycsimulate.model
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Matrix
 import android.util.Log
 import org.pytorch.IValue
 import org.pytorch.Module
 import org.pytorch.Tensor
 import org.pytorch.LiteModuleLoader
-import kotlin.math.max
 import java.io.File
 import java.io.FileOutputStream
-import java.io.InputStream
 
-data class EkycResult(val livenessProb: Float, val quality: Float, val verificationScore: Float)
+data class EkycResult(val livenessProb: Float, val matchingScore: Float) {
+    fun isPassed(threshold: Float = 0.7f): Boolean {
+        return livenessProb > threshold && matchingScore > threshold
+    }
+}
 
 class EkycModelManager(private val context: Context) {
     private var module: Module? = null
 
     init {
         try {
-            module = loadModuleFromAssets("ekyc_model.pt")
+            module = loadModuleFromAssets("ekyc_model_mobile.ptl")
         } catch (e: Exception) {
             Log.e("EkycModelManager", "Failed to load model: ${e.message}")
         }
@@ -29,15 +30,23 @@ class EkycModelManager(private val context: Context) {
     private fun loadModuleFromAssets(assetName: String): Module? {
         val file = File(context.filesDir, assetName)
         if (!file.exists()) {
-            // Copy from assets
-            context.assets.open(assetName).use { input ->
-                FileOutputStream(file).use { output ->
-                    input.copyTo(output)
+            try {
+                context.assets.open(assetName).use { input ->
+                    FileOutputStream(file).use { output ->
+                        input.copyTo(output)
+                    }
                 }
+            } catch (e: Exception) {
+                Log.e("EkycModelManager", "Error copying asset: $assetName", e)
+                return null
             }
         }
-        // Use LiteModuleLoader for models exported with _save_for_lite_interpreter
-        return LiteModuleLoader.load(file.absolutePath)
+        return try {
+            LiteModuleLoader.load(file.absolutePath)
+        } catch (e: Exception) {
+            Log.e("EkycModelManager", "Error loading module: ${file.absolutePath}", e)
+            null
+        }
     }
 
     private fun preprocessId(idBitmap: Bitmap): FloatArray {
@@ -62,10 +71,7 @@ class EkycModelManager(private val context: Context) {
             val bmp = frames[t]
             val resized = Bitmap.createScaledBitmap(bmp, W, H, true)
             resized.getPixels(pixels, 0, W, 0, 0, W, H)
-            if (resized != bmp) {
-                // resized.recycle()
-            }
-
+            
             for (i in 0 until HW) {
                 val c = pixels[i]
                 val r = ((c shr 16) and 0xFF) / 255.0f
@@ -96,7 +102,6 @@ class EkycModelManager(private val context: Context) {
         val out = FloatArray(3 * width * height)
         val wh = width * height
 
-        // channel-first: R-channel then G then B
         var rIndex = 0
         var gIndex = wh
         var bIndex = 2 * wh
@@ -115,69 +120,67 @@ class EkycModelManager(private val context: Context) {
         return out
     }
 
-    // ...
-
     fun runInference(frames: List<Bitmap>, idBitmap: Bitmap): Result<EkycResult> {
         Log.d("EkycModelManager", "runInference called with ${frames.size} frames")
         if (module == null) {
             Log.e("EkycModelManager", "Module is null. Attempting to reload...")
-            try {
-                module = loadModuleFromAssets("ekyc_mobile.pt")
-            } catch (e: Exception) {
-                Log.e("EkycModelManager", "Reload failed: ${e.message}")
-                return Result.failure(Exception("Failed to load model: ${e.message}"))
-            }
+            module = loadModuleFromAssets("ekyc_model_mobile.ptl")
             if (module == null) {
-                return Result.failure(Exception("Module is null after reload"))
+                return Result.failure(Exception("Failed to load model ekyc_model_mobile.ptl"))
             }
         }
         val mod = module!!
         
         try {
             val T = frames.size
-            Log.d("EkycModelManager", "Preprocessing ${frames.size} frames...")
-            // Layout: [T, C, H, W]
-            val framesArr = preprocessFrames(frames)
             
+            // 1. Preprocess ID Image
             Log.d("EkycModelManager", "Preprocessing ID bitmap...")
-            val idArr = preprocessId(idBitmap) // length 3*224*224
-
-            Log.d("EkycModelManager", "Creating tensors...")
-            // Shape: [1, T, 3, 224, 224] (NTCHW) - Matches export code: torch.randn(1, 16, 3, 224, 224)
-            // Note: preprocessFrames produces [T, C, H, W].
-            // Tensor expects [1, T, C, H, W].
-            // Wait, preprocessFrames produces T*C*H*W.
-            // If we use shape [1, T, 3, 224, 224], it expects T*3*224*224.
-            // The layout matches.
-            val framesTensor = Tensor.fromBlob(framesArr, longArrayOf(1, T.toLong(), 3, 224, 224))
+            val idArr = preprocessId(idBitmap) 
+            // Shape: [1, 3, 224, 224]
             val idTensor = Tensor.fromBlob(idArr, longArrayOf(1, 3, 224, 224))
 
-            val inputs = arrayOf(IValue.from(framesTensor), IValue.from(idTensor))
+            // 2. Preprocess Video Frames
+            Log.d("EkycModelManager", "Preprocessing ${frames.size} frames...")
+            val framesArr = preprocessFrames(frames)
+            // Shape: [1, T, 3, 224, 224]
+            val framesTensor = Tensor.fromBlob(framesArr, longArrayOf(1, T.toLong(), 3, 224, 224))
+
+            // DEBUG: Check tensor values
+            val idMean = idArr.average()
+            val framesMean = framesArr.average()
+            Log.d("EkycModelManager", "ID Tensor Stats: Size=${idArr.size}, Mean=$idMean, First=${idArr.take(5)}")
+            Log.d("EkycModelManager", "Frames Tensor Stats: Size=${framesArr.size}, Mean=$framesMean, First=${framesArr.take(5)}")
+
+
+            // 3. Prepare Inputs - SWAPPED ORDER: (ID, Video)
+            // Model forward: def forward(self, id_img, video_frames):
+            val inputs = arrayOf(IValue.from(idTensor), IValue.from(framesTensor))
             
             Log.d("EkycModelManager", "Running forward pass...")
             val outputs = mod.forward(*inputs)
-            Log.d("EkycModelManager", "Forward pass complete. Output: $outputs")
             
             if (outputs.isTuple) {
                 val tuple = outputs.toTuple()
-                Log.d("EkycModelManager", "Output is tuple of size ${tuple.size}")
+                // Model returns: (live_score, match_score)
+                if (tuple.size < 2) {
+                     return Result.failure(Exception("Model output tuple size mismatch. Expected >= 2, got ${tuple.size}"))
+                }
+                
                 val livenessTensor = tuple[0].toTensor()
-                val qualityTensor = tuple[1].toTensor()
-                val verificationTensor = tuple[2].toTensor()
+                val matchingTensor = tuple[1].toTensor()
 
                 val livenessProb = livenessTensor.dataAsFloatArray[0]
-                val quality = qualityTensor.dataAsFloatArray[0]
-                val verification = verificationTensor.dataAsFloatArray[0]
+                val matchingScore = matchingTensor.dataAsFloatArray[0]
                 
-                Log.d("EkycModelManager", "Inference success: L=$livenessProb, Q=$quality, V=$verification")
-                return Result.success(EkycResult(livenessProb, quality, verification))
+                Log.d("EkycModelManager", "Inference success: Liveness=$livenessProb, Matching=$matchingScore")
+                return Result.success(EkycResult(livenessProb, matchingScore))
             } else {
                 Log.e("EkycModelManager", "Unexpected model output type: $outputs")
                 return Result.failure(Exception("Unexpected model output type"))
             }
         } catch (e: Exception) {
             Log.e("EkycModelManager", "Model inference failed", e)
-            e.printStackTrace()
             return Result.failure(e)
         }
     }

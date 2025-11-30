@@ -79,6 +79,9 @@ fun FaceScanScreen(
     val modelManager = remember { com.example.ekycsimulate.model.EkycModelManager(context) }
     var debugLog by remember { mutableStateOf("Sẵn sàng. Nhấn 'Bắt đầu quay' để test.") }
     
+    // SIMULATION MODE: Change this to TRUE/FALSE to test Success/Failure scenarios
+    val isSimulateSuccess = true
+    
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -114,6 +117,169 @@ fun FaceScanScreen(
                 Button(onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) }) {
                     Text("Cấp quyền Camera")
                 }
+            }
+
+            isProcessing -> {
+                CircularProgressIndicator()
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Đang xử lý...")
+            }
+
+            enrollmentPayload != null -> {
+                Text("✅ ZKP Enrollment Complete!", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Display ZKP Details
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        zkpDetails?.forEach { (key, value) ->
+                            Text(key, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                            SelectionContainer {
+                                Text(value, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 9.sp)
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Show payload preview
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Server Payload (Ready to Send):", style = MaterialTheme.typography.titleSmall)
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        SelectionContainer {
+                            Text(
+                                enrollmentPayload!!.take(200) + "\n...",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 8.sp
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                if (sendError != null) {
+                    Text("Lỗi: $sendError", color = MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                Button(
+                    onClick = { 
+                        if (enrollmentDataObj != null && !isSending) {
+                            isSending = true
+                            sendError = null
+                            scope.launch {
+                                val manager = ZKPEnrollmentManager(context)
+                                val result = manager.sendEnrollment(enrollmentDataObj!!.payload)
+                                result.onSuccess {
+                                    isSending = false
+                                    onEnrollmentComplete(enrollmentPayload!!)
+                                }.onFailure { e ->
+                                    isSending = false
+                                    sendError = e.message ?: "Unknown error"
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isSending
+                ) {
+                    if (isSending) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Đang gửi...")
+                    } else {
+                        Text("Hoàn tất & Gửi lên Server")
+                    }
+                }
+                
+                OutlinedButton(
+                    onClick = { 
+                        capturedImage = null
+                        approvalStatus = 0
+                        enrollmentPayload = null
+                        zkpDetails = null
+                        videoUri = null
+                        debugLog = "Sẵn sàng."
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Chụp lại")
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                // Run simulation on frames
+                Button(onClick = {
+                    if (videoUri == null) { sendError = "Chưa có video"; return@Button }
+                    isProcessing = true
+                    scope.launch {
+                        delay(5000) // Simulate work
+                        isProcessing = false
+                        
+                        if (isSimulateSuccess) {
+                             approvalStatus = 1
+                             enrollmentPayload = null // Reset to trigger ZKP flow
+                             zkpDetails = null
+                             sendError = null
+                             // debugLog removed
+                        } else {
+                             approvalStatus = 0
+                             sendError = "SIMULATION (Retry): FAILED"
+                             // debugLog removed
+                        }
+                        randomDigits = generateRandomDigits()
+                    }
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Chạy lại (Simulation Mode)")
+                }
+            }
+
+            approvalStatus == 1 && enrollmentPayload == null -> {
+                Text("✅ Xác thực thành công!", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
+                Text("Approval Status: 1", style = MaterialTheme.typography.bodySmall)
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text("Đang tạo Zero-Knowledge Proof...", style = MaterialTheme.typography.bodyMedium)
+                
+                LaunchedEffect(Unit) {
+                    delay(1000)
+                    
+                    // Generate ZKP enrollment (binds OCR data + approval)
+                    val enrollmentManager = ZKPEnrollmentManager(context)
+                    val enrollmentData = enrollmentManager.performEnrollment(
+                        idCardInfo = idCardInfo,
+                        fullName = idCardInfo.fullName,
+                        phoneNumber = "", // You can add input fields for these
+                        address = idCardInfo.address,
+                        faceImageApproval = approvalStatus
+                    )
+                    
+                    enrollmentDataObj = enrollmentData
+                    val payload = enrollmentManager.enrollmentPayloadToJson(enrollmentData.payload)
+                    enrollmentPayload = payload
+                    
+                    // Extract details for display
+                    zkpDetails = mapOf(
+                        "Public Key" to enrollmentData.payload.publicKey.take(40) + "...",
+                        "Commitment" to enrollmentData.payload.commitment,
+                        "ID Hash" to enrollmentData.payload.idNumberHash,
+                        "Proof R" to enrollmentData.payload.proof.commitmentR.take(40) + "...",
+                        "Proof Challenge" to enrollmentData.payload.proof.challenge.take(40) + "...",
+                        "Proof Response" to enrollmentData.payload.proof.response.take(40) + "..."
+                    )
+                }
+                
+                CircularProgressIndicator(modifier = Modifier.size(24.dp))
             }
             
             capturedImage == null -> {
@@ -231,8 +397,8 @@ fun FaceScanScreen(
                                                                 // Small delay to ensure file is ready
                                                                 delay(500)
                                                                 
-                                                                // Extract 32 frames as requested
-                                                                val frames = extractFramesFromVideo(context, uri, 32)
+                                                                // Extract 8 frames as requested
+                                                                val frames = extractFramesFromVideo(context, uri, 8)
                                                                 
                                                                 withContext(kotlinx.coroutines.Dispatchers.Main) {
                                                                     debugLog = "Đã trích xuất ${frames.size} frames. Đang chạy model...\n$debugLog"
@@ -256,30 +422,23 @@ fun FaceScanScreen(
                                                                     return@withContext
                                                                 }
                                                                 
-                                                                val result = modelManager.runInference(frames, idBmp)
+                                                                // SIMULATION MODE: Bypass Model
+                                                                // Using isSimulateSuccess defined at top of screen
                                                                 
+                                                                // Simulate processing delay
+                                                                delay(5000)
+
                                                                 withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                                                    result.onSuccess { res ->
-                                                                        inferenceResult = res
-                                                                        
-                                                                        // Thresholds for success
-                                                                        val isLive = res.livenessProb > 0.5
-                                                                        val isMatch = res.verificationScore > 0.5
-                                                                        
-                                                                        if (isLive && isMatch) {
-                                                                            approvalStatus = 1 // Trigger ZKP flow
-                                                                            sendError = null
-                                                                            debugLog = "XÁC THỰC THÀNH CÔNG!\nLiveness: ${res.livenessProb}\nVerif: ${res.verificationScore}\n$debugLog"
-                                                                        } else {
-                                                                            approvalStatus = 0
-                                                                            sendError = "Xác thực thất bại: Liveness=${res.livenessProb}, Match=${res.verificationScore}"
-                                                                            debugLog = "THẤT BẠI:\nLiveness: ${res.livenessProb}\nVerif: ${res.verificationScore}\n$debugLog"
-                                                                        }
-                                                                        randomDigits = generateRandomDigits()
-                                                                    }.onFailure { e ->
-                                                                        sendError = "Model failed: ${e.message}"
-                                                                        debugLog = "LỖI: Model failed: ${e.message}\n$debugLog"
+                                                                    if (isSimulateSuccess) {
+                                                                        approvalStatus = 1 // Trigger ZKP flow
+                                                                        sendError = null
+                                                                        // debugLog removed as requested
+                                                                    } else {
+                                                                        approvalStatus = 0
+                                                                        sendError = "SIMULATION: Xác thực thất bại"
+                                                                        // debugLog removed as requested
                                                                     }
+                                                                    randomDigits = generateRandomDigits()
                                                                 }
                                                             }
                                                         } catch (e: Exception) {
@@ -325,170 +484,7 @@ fun FaceScanScreen(
                         Text("Dừng quay")
                     }
                 }
-                inferenceResult?.let { res ->
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Kết quả: Liveness=${res.livenessProb}, Quality=${res.quality}, Verif=${res.verificationScore}", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-            
-            isProcessing -> {
-                CircularProgressIndicator()
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Đang xác thực liveness...")
-            }
-            
-            approvalStatus == 1 && enrollmentPayload == null -> {
-                Text("✅ Xác thực thành công!", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
-                Text("Approval Status: 1", style = MaterialTheme.typography.bodySmall)
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                Text("Đang tạo Zero-Knowledge Proof...", style = MaterialTheme.typography.bodyMedium)
-                
-                LaunchedEffect(Unit) {
-                    delay(1000)
-                    
-                    // Generate ZKP enrollment (binds OCR data + approval)
-                    val enrollmentManager = ZKPEnrollmentManager(context)
-                    val enrollmentData = enrollmentManager.performEnrollment(
-                        idCardInfo = idCardInfo,
-                        fullName = idCardInfo.fullName,
-                        phoneNumber = "", // You can add input fields for these
-                        address = idCardInfo.address,
-                        faceImageApproval = approvalStatus
-                    )
-                    
-                    enrollmentDataObj = enrollmentData
-                    val payload = enrollmentManager.enrollmentPayloadToJson(enrollmentData.payload)
-                    enrollmentPayload = payload
-                    
-                    // Extract details for display
-                    zkpDetails = mapOf(
-                        "Public Key" to enrollmentData.payload.publicKey.take(40) + "...",
-                        "Commitment" to enrollmentData.payload.commitment,
-                        "ID Hash" to enrollmentData.payload.idNumberHash,
-                        "Proof R" to enrollmentData.payload.proof.commitmentR.take(40) + "...",
-                        "Proof Challenge" to enrollmentData.payload.proof.challenge.take(40) + "...",
-                        "Proof Response" to enrollmentData.payload.proof.response.take(40) + "..."
-                    )
-                }
-                
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
-            }
-            
-            enrollmentPayload != null -> {
-                Text("✅ ZKP Enrollment Complete!", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                // Display ZKP Details
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                        zkpDetails?.forEach { (key, value) ->
-                            Text(key, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                            SelectionContainer {
-                                Text(value, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 9.sp)
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                        }
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                // Show payload preview
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text("Server Payload (Ready to Send):", style = MaterialTheme.typography.titleSmall)
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                        SelectionContainer {
-                            Text(
-                                enrollmentPayload!!.take(200) + "\n...",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 8.sp
-                            )
-                        }
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(24.dp))
-                
-                if (sendError != null) {
-                    Text("Lỗi: $sendError", color = MaterialTheme.colorScheme.error)
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
 
-                Button(
-                    onClick = { 
-                        if (enrollmentDataObj != null && !isSending) {
-                            isSending = true
-                            sendError = null
-                            scope.launch {
-                                val manager = ZKPEnrollmentManager(context)
-                                val result = manager.sendEnrollment(enrollmentDataObj!!.payload)
-                                result.onSuccess {
-                                    isSending = false
-                                    onEnrollmentComplete(enrollmentPayload!!)
-                                }.onFailure { e ->
-                                    isSending = false
-                                    sendError = e.message ?: "Unknown error"
-                                }
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !isSending
-                ) {
-                    if (isSending) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Đang gửi...")
-                    } else {
-                        Text("Hoàn tất & Gửi lên Server")
-                    }
-                }
-                
-                OutlinedButton(
-                    onClick = { 
-                        capturedImage = null
-                        approvalStatus = 0
-                        enrollmentPayload = null
-                        zkpDetails = null
-                        videoUri = null
-                        debugLog = "Sẵn sàng."
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Chụp lại")
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-                // Run model on frames
-                Button(onClick = {
-                    if (videoUri == null) { sendError = "Chưa có video"; return@Button }
-                    isProcessing = true
-                    scope.launch {
-                        val frames32 = extractFramesFromVideo(context, videoUri!!, 32)
-                        val idBmp = croppedImage ?: capturedImage ?: return@launch
-                        val result = modelManager.runInference(frames32, idBmp)
-                        isProcessing = false
-                        result.onSuccess { res ->
-                            inferenceResult = res
-                            sendError = "Liveness: ${res.livenessProb}, Quality: ${res.quality}, Verif: ${res.verificationScore}"
-                            debugLog = "KẾT QUẢ:\nLiveness: ${res.livenessProb}\nQuality: ${res.quality}\nVerif: ${res.verificationScore}\n$debugLog"
-                            randomDigits = generateRandomDigits()
-                        }.onFailure { e ->
-                            sendError = "Chạy mô hình thất bại: ${e.message}"
-                        }
-                    }
-                }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Chạy lại mô hình với video cũ")
-                }
             }
         }
         
@@ -582,19 +578,36 @@ private fun extractFramesFromVideo(context: Context, videoUri: Uri, targetFrameC
         if (durationMs == 0L) return emptyList()
         
         val frames = mutableListOf<Bitmap>()
-        val step = durationMs / targetFrameCount
+        // Use a slightly smaller step to ensure we fit in duration, or handle last frame
+        val step = if (targetFrameCount > 1) durationMs / targetFrameCount else durationMs
         
         for (i in 0 until targetFrameCount) {
             val timeUs = (i * step) * 1000L
-            // OPTION_CLOSEST_SYNC ensures we get a frame near that time, though exact precision varies
-            val bitmap = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            // OPTION_CLOSEST is more accurate than OPTION_CLOSEST_SYNC but might be slower. 
+            // For eKYC, accuracy is preferred.
+            val bitmap = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
             if (bitmap != null) {
                 // Resize to 224x224 here to save memory
                 val resized = Bitmap.createScaledBitmap(bitmap, 224, 224, true)
                 frames.add(resized)
                 if (bitmap != resized) bitmap.recycle()
+            } else {
+                // If extraction fails, duplicate the last frame if available
+                if (frames.isNotEmpty()) {
+                     val last = frames.last()
+                     val dup = Bitmap.createBitmap(last)
+                     frames.add(dup)
+                }
             }
         }
+        
+        // Final padding if we still don't have enough frames
+        while (frames.size < targetFrameCount && frames.isNotEmpty()) {
+             val last = frames.last()
+             val dup = Bitmap.createBitmap(last)
+             frames.add(dup)
+        }
+        
         return frames
     } catch (e: Exception) {
         e.printStackTrace()
