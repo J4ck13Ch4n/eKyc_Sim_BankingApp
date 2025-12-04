@@ -54,7 +54,8 @@ class EkycModelManager(private val context: Context) {
     }
 
     private fun preprocessFrames(frames: List<Bitmap>): FloatArray {
-        // Layout: [T, C, H, W]
+        // Model expects: [1, T, C, H, W]
+        // We return FloatArray in T,C,H,W layout (no batch dim, will add in runInference)
         val T = frames.size
         val H = 224
         val W = 224
@@ -69,23 +70,24 @@ class EkycModelManager(private val context: Context) {
 
         for (t in 0 until T) {
             val bmp = frames[t]
+            // Ensure bitmap is RGB and resized
             val resized = Bitmap.createScaledBitmap(bmp, W, H, true)
             resized.getPixels(pixels, 0, W, 0, 0, W, H)
             
+            // Extract pixel data into CHW layout
+            var rIdx = t * CHW + 0 * HW
+            var gIdx = t * CHW + 1 * HW
+            var bIdx = t * CHW + 2 * HW
+            
             for (i in 0 until HW) {
-                val c = pixels[i]
-                val r = ((c shr 16) and 0xFF) / 255.0f
-                val g = ((c shr 8) and 0xFF) / 255.0f
-                val b = (c and 0xFF) / 255.0f
+                val pixel = pixels[i]
+                val r = ((pixel shr 16) and 0xFF) / 255.0f
+                val g = ((pixel shr 8) and 0xFF) / 255.0f
+                val b = (pixel and 0xFF) / 255.0f
 
-                // Frame t, Channel 0 (R), Pixel i
-                out[t * CHW + 0 * HW + i] = (r - mean[0]) / std[0]
-                
-                // Frame t, Channel 1 (G), Pixel i
-                out[t * CHW + 1 * HW + i] = (g - mean[1]) / std[1]
-                
-                // Frame t, Channel 2 (B), Pixel i
-                out[t * CHW + 2 * HW + i] = (b - mean[2]) / std[2]
+                out[rIdx++] = (r - mean[0]) / std[0]
+                out[gIdx++] = (g - mean[1]) / std[1]
+                out[bIdx++] = (b - mean[2]) / std[2]
             }
         }
         return out
@@ -133,6 +135,9 @@ class EkycModelManager(private val context: Context) {
         
         try {
             val T = frames.size
+            if (T <= 0) {
+                return Result.failure(Exception("No frames provided for inference"))
+            }
             
             // 1. Preprocess ID Image
             Log.d("EkycModelManager", "Preprocessing ID bitmap...")
@@ -149,20 +154,23 @@ class EkycModelManager(private val context: Context) {
             // DEBUG: Check tensor values
             val idMean = idArr.average()
             val framesMean = framesArr.average()
-            Log.d("EkycModelManager", "ID Tensor Stats: Size=${idArr.size}, Mean=$idMean, First=${idArr.take(5)}")
-            Log.d("EkycModelManager", "Frames Tensor Stats: Size=${framesArr.size}, Mean=$framesMean, First=${framesArr.take(5)}")
+            val idStd = kotlin.math.sqrt(idArr.map { (it - idMean) * (it - idMean) }.average())
+            val framesStd = kotlin.math.sqrt(framesArr.map { (it - framesMean) * (it - framesMean) }.average())
+            
+            Log.d("EkycModelManager", "ID Tensor: size=${idArr.size}, mean=$idMean, std=$idStd, first5=${idArr.take(5)}")
+            Log.d("EkycModelManager", "Frames Tensor: size=${framesArr.size}, mean=$framesMean, std=$framesStd, first5=${framesArr.take(5)}")
 
-
-            // 3. Prepare Inputs - SWAPPED ORDER: (ID, Video)
+            // 3. Prepare Inputs - Order: (ID, Video)
             // Model forward: def forward(self, id_img, video_frames):
             val inputs = arrayOf(IValue.from(idTensor), IValue.from(framesTensor))
             
-            Log.d("EkycModelManager", "Running forward pass...")
+            Log.d("EkycModelManager", "Running forward pass with ID shape [1,3,224,224] and Video shape [1,$T,3,224,224]...")
             val outputs = mod.forward(*inputs)
             
             if (outputs.isTuple) {
                 val tuple = outputs.toTuple()
-                // Model returns: (live_score, match_score)
+                Log.d("EkycModelManager", "Output tuple size: ${tuple.size}")
+                
                 if (tuple.size < 2) {
                      return Result.failure(Exception("Model output tuple size mismatch. Expected >= 2, got ${tuple.size}"))
                 }
@@ -173,14 +181,14 @@ class EkycModelManager(private val context: Context) {
                 val livenessProb = livenessTensor.dataAsFloatArray[0]
                 val matchingScore = matchingTensor.dataAsFloatArray[0]
                 
-                Log.d("EkycModelManager", "Inference success: Liveness=$livenessProb, Matching=$matchingScore")
+                Log.d("EkycModelManager", "✅ Inference success: Liveness=$livenessProb, Matching=$matchingScore")
                 return Result.success(EkycResult(livenessProb, matchingScore))
             } else {
-                Log.e("EkycModelManager", "Unexpected model output type: $outputs")
+                Log.e("EkycModelManager", "❌ Unexpected model output type: $outputs")
                 return Result.failure(Exception("Unexpected model output type"))
             }
         } catch (e: Exception) {
-            Log.e("EkycModelManager", "Model inference failed", e)
+            Log.e("EkycModelManager", "❌ Model inference failed", e)
             return Result.failure(e)
         }
     }

@@ -9,6 +9,7 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.MediaStore
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -78,9 +79,6 @@ fun FaceScanScreen(
     var inferenceResult by remember { mutableStateOf<com.example.ekycsimulate.model.EkycResult?>(null) }
     val modelManager = remember { com.example.ekycsimulate.model.EkycModelManager(context) }
     var debugLog by remember { mutableStateOf("Sẵn sàng. Nhấn 'Bắt đầu quay' để test.") }
-    
-    // SIMULATION MODE: Change this to TRUE/FALSE to test Success/Failure scenarios
-    val isSimulateSuccess = true
     
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -218,6 +216,7 @@ fun FaceScanScreen(
                     Text("Chụp lại")
                 }
                 Spacer(modifier = Modifier.height(16.dp))
+                
                 // Run simulation on frames
                 Button(onClick = {
                     if (videoUri == null) { sendError = "Chưa có video"; return@Button }
@@ -226,21 +225,14 @@ fun FaceScanScreen(
                         delay(5000) // Simulate work
                         isProcessing = false
                         
-                        if (isSimulateSuccess) {
-                             approvalStatus = 1
-                             enrollmentPayload = null // Reset to trigger ZKP flow
-                             zkpDetails = null
-                             sendError = null
-                             // debugLog removed
-                        } else {
-                             approvalStatus = 0
-                             sendError = "SIMULATION (Retry): FAILED"
-                             // debugLog removed
-                        }
+                        approvalStatus = 1
+                        enrollmentPayload = null // Reset to trigger ZKP flow
+                        zkpDetails = null
+                        sendError = null
                         randomDigits = generateRandomDigits()
                     }
                 }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Chạy lại (Simulation Mode)")
+                    Text("Chạy lại (Model Inference)")
                 }
             }
 
@@ -422,21 +414,33 @@ fun FaceScanScreen(
                                                                     return@withContext
                                                                 }
                                                                 
-                                                                // SIMULATION MODE: Bypass Model
-                                                                // Using isSimulateSuccess defined at top of screen
+                                                                // ✅ RUN ACTUAL MODEL INFERENCE
+                                                                Log.d("FaceScanScreen", "🔄 Running model inference with ${frames.size} frames and ID bitmap")
+                                                                val result = modelManager.runInference(frames, idBmp)
                                                                 
-                                                                // Simulate processing delay
-                                                                delay(5000)
-
                                                                 withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                                                    if (isSimulateSuccess) {
-                                                                        approvalStatus = 1 // Trigger ZKP flow
-                                                                        sendError = null
-                                                                        // debugLog removed as requested
-                                                                    } else {
+                                                                    result.onSuccess { ekycResult ->
+                                                                        Log.d("FaceScanScreen", "✅ Model inference success: $ekycResult")
+                                                                        inferenceResult = ekycResult
+                                                                        
+                                                                        val livenessThreshold = 0.5f
+                                                                        val matchingThreshold = 0.5f
+                                                                        
+                                                                        if (ekycResult.livenessProb > livenessThreshold && 
+                                                                            ekycResult.matchingScore > matchingThreshold) {
+                                                                            approvalStatus = 1 // Approved
+                                                                            sendError = null
+                                                                            debugLog = "✅ Xác thực thành công!\nLiveness: ${ekycResult.livenessProb}\nMatching: ${ekycResult.matchingScore}\n"
+                                                                        } else {
+                                                                            approvalStatus = 0 // Failed
+                                                                            sendError = "❌ Xác thực thất bại:\nLiveness: ${ekycResult.livenessProb} (threshold: $livenessThreshold)\nMatching: ${ekycResult.matchingScore} (threshold: $matchingThreshold)"
+                                                                            debugLog = sendError + "\n"
+                                                                        }
+                                                                    }.onFailure { e ->
                                                                         approvalStatus = 0
-                                                                        sendError = "SIMULATION: Xác thực thất bại"
-                                                                        // debugLog removed as requested
+                                                                        sendError = "❌ Model Error: ${e.message}"
+                                                                        Log.e("FaceScanScreen", "❌ Model inference failed: ${e.message}", e)
+                                                                        debugLog = "LỖI Xử lý model: ${e.message}\n$debugLog"
                                                                     }
                                                                     randomDigits = generateRandomDigits()
                                                                 }
