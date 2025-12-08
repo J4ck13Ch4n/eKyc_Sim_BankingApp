@@ -1,0 +1,16 @@
+Testing Enrollment against https://ekyc-backend-436637848640.asia-northeast1.run.app...
+Status Code: 200
+Response: {"success":true,"userId":1}
+✅ Enrollment SUCCESS!
+Testing Enrollment against https://ekyc-backend-436637848640.asia-northeast1.run.app...
+Status Code: 200
+Response: {"success":true,"userId":2}
+✅ Enrollment SUCCESS!
+Testing Enrollment against https://ekyc-backend-436637848640.asia-northeast1.run.app...
+Status Code: 200
+Response: {"success":true,"userId":3}
+✅ Enrollment SUCCESS!
+Testing Enrollment against https://ekyc-backend-436637848640.asia-northeast1.run.app...
+Status Code: 200
+Response: {"success":true,"userId":4}
+✅ Enrollment SUCCESS!

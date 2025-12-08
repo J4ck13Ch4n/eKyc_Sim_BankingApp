@@ -165,11 +165,7 @@ def check_citizen(id_hash: str, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.id_hash == id_hash).first()
     
     if user:
-        return {
-            "exists": True,
-            "user_id": user.id,
-            "created_at": "2024-01-01" # In real app, fetch from created_at column
-        }
+        return {"exists": True, "user_id": user.id, "created_at": user.created_at}
     else:
         return {"exists": False}
 

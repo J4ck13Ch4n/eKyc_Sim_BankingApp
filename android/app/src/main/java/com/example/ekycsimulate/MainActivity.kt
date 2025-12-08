@@ -132,6 +132,9 @@ fun AppNavigation() {
                     navController.navigate("${AppRoutes.HOME}/0") {
                         popUpTo(AppRoutes.LANDING) { inclusive = false }
                     }
+                    },
+                    onBack = {
+                        navController.popBackStack()
                     }
                 )
             } else {

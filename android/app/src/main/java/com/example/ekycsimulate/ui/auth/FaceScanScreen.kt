@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -48,7 +49,8 @@ import java.util.concurrent.Executors
 fun FaceScanScreen(
     idCardInfo: IdCardInfo,
     croppedImage: Bitmap?, // Passed from shared ViewModel
-    onEnrollmentComplete: (String) -> Unit  // Callback with JSON payload
+    onEnrollmentComplete: (String) -> Unit,  // Callback with JSON payload
+    onBack: () -> Unit // Callback for Cancel button
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -77,8 +79,8 @@ fun FaceScanScreen(
     var isSending by remember { mutableStateOf(false) }
     var sendError by remember { mutableStateOf<String?>(null) }
     var inferenceResult by remember { mutableStateOf<com.example.ekycsimulate.model.EkycResult?>(null) }
-    val modelManager = remember { com.example.ekycsimulate.model.EkycModelManager(context) }
-    var debugLog by remember { mutableStateOf("Sẵn sàng. Nhấn 'Bắt đầu quay' để test.") }
+
+
     
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -92,6 +94,8 @@ fun FaceScanScreen(
         if (useFakeDetector) com.example.ekycsimulate.data.FakeFaceDetector() 
         else com.example.ekycsimulate.data.MLKitFaceDetector() 
     }
+
+    val modelManager = remember { com.example.ekycsimulate.model.EkycModelManager(context, faceDetector) }
 
     LaunchedEffect(Unit) {
         if (!hasCameraPermission) {
@@ -114,6 +118,69 @@ fun FaceScanScreen(
                 Text("Cần quyền truy cập Camera để tiếp tục")
                 Button(onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) }) {
                     Text("Cấp quyền Camera")
+                }
+            }
+            
+            // FAILURE STATE: Show Error and Retry/Cancel options
+            sendError != null -> {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = androidx.compose.material.icons.Icons.Default.Warning,
+                            contentDescription = "Error",
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Xác thực thất bại",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = sendError ?: "Lỗi không xác định",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    OutlinedButton(
+                        onClick = onBack,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Hủy bỏ")
+                    }
+                    
+                    Spacer(modifier = Modifier.width(16.dp))
+                    
+                    Button(
+                        onClick = {
+                            // Retry Logic
+                            sendError = null
+                            approvalStatus = 0
+                            capturedImage = null
+                            videoUri = null
+                            isProcessing = false
+                            inferenceResult = null // Reset this too
+                            randomDigits = generateRandomDigits()
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Thử lại")
+                    }
                 }
             }
 
@@ -209,7 +276,7 @@ fun FaceScanScreen(
                         enrollmentPayload = null
                         zkpDetails = null
                         videoUri = null
-                        debugLog = "Sẵn sàng."
+
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -342,7 +409,7 @@ fun FaceScanScreen(
                     Button(
                         onClick = {
                             if (videoCapture == null) {
-                                debugLog = "LỖI: Camera chưa sẵn sàng (VideoCapture null)\n$debugLog"
+
                                 return@Button
                             }
                             
@@ -371,14 +438,14 @@ fun FaceScanScreen(
                                         when(recordEvent) {
                                             is VideoRecordEvent.Start -> {
                                                 isRecording = true
-                                                debugLog = "Đang quay video... (Đọc dãy số trên)\n"
+
                                             }
                                             is VideoRecordEvent.Finalize -> {
                                                 isRecording = false
                                                 if (!recordEvent.hasError()) {
                                                     val uri = recordEvent.outputResults.outputUri
                                                     videoUri = uri
-                                                    debugLog = "Video đã lưu tại: $uri\nĐang trích xuất frames...\n$debugLog"
+
                                                     
                                                     // Process video
                                                     scope.launch {
@@ -392,14 +459,12 @@ fun FaceScanScreen(
                                                                 // Extract 8 frames as requested
                                                                 val frames = extractFramesFromVideo(context, uri, 8)
                                                                 
-                                                                withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                                                    debugLog = "Đã trích xuất ${frames.size} frames. Đang chạy model...\n$debugLog"
-                                                                }
+
                                                                 
                                                                 if (frames.isEmpty()) {
                                                                     withContext(kotlinx.coroutines.Dispatchers.Main) {
                                                                         sendError = "Không thể trích xuất frames từ video"
-                                                                        debugLog = "LỖI: Không trích xuất được frames nào.\n$debugLog"
+
                                                                     }
                                                                     return@withContext
                                                                 }
@@ -409,7 +474,7 @@ fun FaceScanScreen(
                                                                 if (idBmp == null) {
                                                                     withContext(kotlinx.coroutines.Dispatchers.Main) {
                                                                         sendError = "Không có ảnh CCCD để ghép với video"
-                                                                        debugLog = "LỖI: Thiếu ảnh CCCD đầu vào (croppedImage is null).\n$debugLog"
+
                                                                     }
                                                                     return@withContext
                                                                 }
@@ -448,7 +513,7 @@ fun FaceScanScreen(
                                                         } catch (e: Exception) {
                                                             withContext(kotlinx.coroutines.Dispatchers.Main) {
                                                                 sendError = e.message
-                                                                debugLog = "LỖI Xử lý: ${e.message}\n$debugLog"
+
                                                             }
                                                         } finally {
                                                             isProcessing = false
@@ -457,14 +522,14 @@ fun FaceScanScreen(
                                                 } else {
                                                     recording?.close()
                                                     recording = null
-                                                    debugLog = "LỖI Quay video: ${recordEvent.error}\n$debugLog"
+
                                                 }
                                             }
                                         }
                                     }
                                 recording = activeRecording
                             } catch (e: Exception) {
-                                debugLog = "LỖI Khởi tạo quay: ${e.message}\n$debugLog"
+
                             }
                         },
                         modifier = Modifier.weight(1f),
@@ -493,25 +558,7 @@ fun FaceScanScreen(
         }
         
         Spacer(modifier = Modifier.height(16.dp))
-        Text("Debug Logs (Cuộn để xem):", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(120.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.LightGray.copy(alpha = 0.3f))
-        ) {
-            SelectionContainer {
-                Text(
-                    text = debugLog,
-                    modifier = Modifier
-                        .padding(8.dp)
-                        .verticalScroll(rememberScrollState()),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-        }
+
     }
 }
 

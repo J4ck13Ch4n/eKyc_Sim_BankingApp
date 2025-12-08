@@ -10,7 +10,7 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 
 object NetworkModule {
-    private const val BASE_URL = "http://10.0.2.2:8001" // Android Emulator to Localhost
+    private const val BASE_URL = "https://ekyc-backend-436637848640.asia-northeast1.run.app" // Cloud Run URL
 
     val client = HttpClient(Android) {
         install(ContentNegotiation) {
