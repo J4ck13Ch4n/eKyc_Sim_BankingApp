@@ -16,15 +16,12 @@ data class EkycResult(val livenessProb: Float, val matchingScore: Float) {
     }
 }
 
-class EkycModelManager(
-    private val context: Context,
-    private val faceDetector: com.example.ekycsimulate.domain.FaceDetector
-) {
+class EkycModelManager(private val context: Context) {
     private var module: Module? = null
 
     init {
         try {
-            module = loadModuleFromAssets("ekyc_model.ptl")
+            module = loadModuleFromAssets("ekyc_model_mobile.ptl")
         } catch (e: Exception) {
             Log.e("EkycModelManager", "Failed to load model: ${e.message}")
         }
@@ -125,51 +122,8 @@ class EkycModelManager(
         return out
     }
 
-    suspend fun runInference(frames: List<Bitmap>, idBitmap: Bitmap): Result<EkycResult> {
+    fun runInference(frames: List<Bitmap>, idBitmap: Bitmap): Result<EkycResult> {
         Log.d("EkycModelManager", "runInference called with ${frames.size} frames")
-        
-        // 0. Detect and Crop Face from ID Card
-        Log.d("EkycModelManager", "Detecting face in ID card...")
-        val faceResults = faceDetector.detect(idBitmap)
-        if (faceResults.isEmpty()) {
-            Log.e("EkycModelManager", "No face detected in ID card")
-            return Result.failure(Exception("No face detected in ID card"))
-        }
-        
-        // Use the largest face
-        val face = faceResults.first()
-        val bounds = face.bounds
-        
-        // --- SQUARE CROP LOGIC ---
-        val centerX = bounds.centerX()
-        val centerY = bounds.centerY()
-        val sideLength = kotlin.math.max(bounds.width(), bounds.height())
-        // Add some padding (e.g., 20%)
-        val paddedSide = (sideLength * 1.2f).toInt()
-        val halfSide = paddedSide / 2
-        
-        val x1 = (centerX - halfSide).coerceAtLeast(0)
-        val y1 = (centerY - halfSide).coerceAtLeast(0)
-        val x2 = (centerX + halfSide).coerceAtMost(idBitmap.width)
-        val y2 = (centerY + halfSide).coerceAtMost(idBitmap.height)
-        
-        val w = x2 - x1
-        val h = y2 - y1
-        
-        if (w <= 0 || h <= 0) {
-             return Result.failure(Exception("Invalid face bounds"))
-        }
-
-        val croppedIdFace = Bitmap.createBitmap(idBitmap, x1, y1, w, h)
-        Log.d("EkycModelManager", "Face cropped square: ${w}x${h}")
-        
-        // DEBUG: Save images to inspect
-        saveBitmapToCache(croppedIdFace, "debug_id_face.jpg")
-        if (frames.isNotEmpty()) {
-            saveBitmapToCache(frames[0], "debug_video_frame_0.jpg")
-        }
-
-
         if (module == null) {
             Log.e("EkycModelManager", "Module is null. Attempting to reload...")
             module = loadModuleFromAssets("ekyc_model_mobile.ptl")
@@ -185,9 +139,9 @@ class EkycModelManager(
                 return Result.failure(Exception("No frames provided for inference"))
             }
             
-            // 1. Preprocess ID Image (Use Cropped Face)
+            // 1. Preprocess ID Image
             Log.d("EkycModelManager", "Preprocessing ID bitmap...")
-            val idArr = preprocessId(croppedIdFace) 
+            val idArr = preprocessId(idBitmap) 
             // Shape: [1, 3, 224, 224]
             val idTensor = Tensor.fromBlob(idArr, longArrayOf(1, 3, 224, 224))
 
@@ -221,18 +175,11 @@ class EkycModelManager(
                      return Result.failure(Exception("Model output tuple size mismatch. Expected >= 2, got ${tuple.size}"))
                 }
                 
-                // --- SWAP OUTPUTS ---
-                val matchingTensor = tuple[0].toTensor() 
-                val livenessTensor = tuple[1].toTensor()
+                val livenessTensor = tuple[0].toTensor()
+                val matchingTensor = tuple[1].toTensor()
 
-                val matchingData = matchingTensor.dataAsFloatArray
-                val livenessData = livenessTensor.dataAsFloatArray
-                
-                Log.d("EkycModelManager", "Raw Matching Tensor: ${matchingData.joinToString()}")
-                Log.d("EkycModelManager", "Raw Liveness Tensor: ${livenessData.joinToString()}")
-
-                val matchingScore = matchingData[0]
-                val livenessProb = livenessData[0]
+                val livenessProb = livenessTensor.dataAsFloatArray[0]
+                val matchingScore = matchingTensor.dataAsFloatArray[0]
                 
                 Log.d("EkycModelManager", "✅ Inference success: Liveness=$livenessProb, Matching=$matchingScore")
                 return Result.success(EkycResult(livenessProb, matchingScore))
@@ -243,18 +190,6 @@ class EkycModelManager(
         } catch (e: Exception) {
             Log.e("EkycModelManager", "❌ Model inference failed", e)
             return Result.failure(e)
-        }
-    }
-
-    private fun saveBitmapToCache(bitmap: Bitmap, filename: String) {
-        try {
-            val file = File(context.cacheDir, filename)
-            FileOutputStream(file).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-            }
-            Log.d("EkycModelManager", "Saved debug image to: ${file.absolutePath}")
-        } catch (e: Exception) {
-            Log.e("EkycModelManager", "Failed to save debug image", e)
         }
     }
 }
