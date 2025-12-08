@@ -79,6 +79,7 @@ fun FaceScanScreen(
     var isSending by remember { mutableStateOf(false) }
     var sendError by remember { mutableStateOf<String?>(null) }
     var inferenceResult by remember { mutableStateOf<com.example.ekycsimulate.model.EkycResult?>(null) }
+    var debugLog by remember { mutableStateOf("") }
 
 
     
