@@ -241,4 +241,31 @@ object ImageProcessor {
         // To keep this code compile-safe even if OpenCV not present, we call it inside try/catch in runAdvancedPreprocessing.
         throw UnsupportedOperationException("OpenCV not initialized in this build. If you want OpenCV path, implement preprocessWithOpenCv using org.opencv.* APIs.")
     }
+    /**
+     * Crops the face from the bitmap given the bounding box, with optional padding.
+     */
+    fun cropFace(bitmap: Bitmap, bounds: Rect, paddingPercent: Float = 0.20f): Bitmap {
+        val width = bounds.width()
+        val height = bounds.height()
+        
+        // Add padding
+        val paddingX = (width * paddingPercent).toInt()
+        val paddingY = (height * paddingPercent).toInt()
+
+        val left = (bounds.left - paddingX).coerceAtLeast(0)
+        val top = (bounds.top - paddingY).coerceAtLeast(0)
+        val right = (bounds.right + paddingX).coerceAtMost(bitmap.width)
+        val bottom = (bounds.bottom + paddingY).coerceAtMost(bitmap.height)
+
+        val cropWidth = right - left
+        val cropHeight = bottom - top
+
+        // If invalid crop, return original or throwing error? Let's return original with warning log for safety
+        if (cropWidth <= 0 || cropHeight <= 0) {
+            Log.w(TAG, "Invalid crop dimensions: w=$cropWidth, h=$cropHeight. Returning original.")
+            return bitmap
+        }
+
+        return Bitmap.createBitmap(bitmap, left, top, cropWidth, cropHeight)
+    }
 }

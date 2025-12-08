@@ -24,7 +24,7 @@ class EkycModelManager(
 
     init {
         try {
-            module = loadModuleFromAssets("ekyc_model_mobile.ptl")
+            module = loadModuleFromAssets("ekyc_model.ptl")
         } catch (e: Exception) {
             Log.e("EkycModelManager", "Failed to load model: ${e.message}")
         }

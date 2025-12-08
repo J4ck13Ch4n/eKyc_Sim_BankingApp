@@ -1,5 +1,7 @@
 package com.example.ekycsimulate.ui.auth
 
+import com.example.ekycsimulate.utils.ImageProcessor
+
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -460,7 +462,9 @@ fun FaceScanScreen(
                                                                 // Extract 8 frames as requested
                                                                 val frames = extractFramesFromVideo(context, uri, 8)
                                                                 
-
+                                                                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                                    debugLog = "Đã trích xuất ${frames.size} frames. Đang chạy Face Detection...\n$debugLog"
+                                                                }
                                                                 
                                                                 if (frames.isEmpty()) {
                                                                     withContext(kotlinx.coroutines.Dispatchers.Main) {
@@ -469,7 +473,30 @@ fun FaceScanScreen(
                                                                     }
                                                                     return@withContext
                                                                 }
+
+                                                                // --- FACE DETECTION & CROPPING (VIDEO) ---
+                                                                val croppedFrames = mutableListOf<Bitmap>()
+                                                                var framesWithFace = 0
+                                                                for (frame in frames) {
+                                                                    val faces = faceDetector.detect(frame)
+                                                                    if (faces.isNotEmpty()) {
+                                                                        val face = faces.first() // Assume largest face/first detected is user
+                                                                        val cropped = ImageProcessor.cropFace(frame, face.bounds)
+                                                                        croppedFrames.add(cropped)
+                                                                        framesWithFace++
+                                                                    } else {
+                                                                        // Fallback: Use center crop or original? 
+                                                                        // Let's use original for now but log it. 
+                                                                        // Or better, skip? If we skip, we might have too few frames.
+                                                                        // Let's keep original but scaled.
+                                                                        croppedFrames.add(frame)
+                                                                    }
+                                                                }
                                                                 
+                                                                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                                    debugLog = "Đã crop $framesWithFace/${frames.size} frames video.\n$debugLog"
+                                                                }
+
                                                                 // Prefer ID card bitmap passed from shared ViewModel, fallback to capturedImage if needed
                                                                 val idBmp = croppedImage ?: capturedImage
                                                                 if (idBmp == null) {
@@ -480,17 +507,32 @@ fun FaceScanScreen(
                                                                     return@withContext
                                                                 }
                                                                 
+                                                                // --- FACE DETECTION & CROPPING (ID CARD) ---
+                                                                var finalIdBmp = idBmp
+                                                                val idFaces = faceDetector.detect(idBmp)
+                                                                if (idFaces.isNotEmpty()) {
+                                                                    val face = idFaces.first()
+                                                                    finalIdBmp = ImageProcessor.cropFace(idBmp, face.bounds)
+                                                                    withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                                        debugLog = "Đã detect & crop mặt từ ảnh CCCD.\n$debugLog"
+                                                                    }
+                                                                } else {
+                                                                    withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                                        debugLog = "CẢNH BÁO: Không tìm thấy mặt trong ảnh CCCD. Dùng ảnh gốc.\n$debugLog"
+                                                                    }
+                                                                }
+                                                                
                                                                 // ✅ RUN ACTUAL MODEL INFERENCE
-                                                                Log.d("FaceScanScreen", "🔄 Running model inference with ${frames.size} frames and ID bitmap")
-                                                                val result = modelManager.runInference(frames, idBmp)
+                                                                Log.d("FaceScanScreen", "🔄 Running model inference with ${croppedFrames.size} frames and ID bitmap")
+                                                                val result = modelManager.runInference(croppedFrames, finalIdBmp)
                                                                 
                                                                 withContext(kotlinx.coroutines.Dispatchers.Main) {
                                                                     result.onSuccess { ekycResult ->
                                                                         Log.d("FaceScanScreen", "✅ Model inference success: $ekycResult")
                                                                         inferenceResult = ekycResult
                                                                         
-                                                                        val livenessThreshold = 0.5f
-                                                                        val matchingThreshold = 0.5f
+                                                                        val livenessThreshold = 0.9f
+                                                                        val matchingThreshold = 0.7f
                                                                         
                                                                         if (ekycResult.livenessProb > livenessThreshold && 
                                                                             ekycResult.matchingScore > matchingThreshold) {
@@ -639,8 +681,10 @@ private fun extractFramesFromVideo(context: Context, videoUri: Uri, targetFrameC
             // For eKYC, accuracy is preferred.
             val bitmap = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
             if (bitmap != null) {
-                // Resize to 224x224 here to save memory
-                val resized = Bitmap.createScaledBitmap(bitmap, 224, 224, true)
+                // Resize to 640px width (maintain aspect ratio) to ensure face detection works well
+                val targetWidth = 640
+                val targetHeight = (bitmap.height * (targetWidth.toFloat() / bitmap.width)).toInt()
+                val resized = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
                 frames.add(resized)
                 if (bitmap != resized) bitmap.recycle()
             } else {
