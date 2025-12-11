@@ -29,6 +29,12 @@ data class ChallengeResponse(
     val sessionId: String
 )
 
+@Serializable
+data class LoginPayload(
+    val email: String,
+    val password: String
+)
+
 object ApiService {
     private val client = NetworkModule.client
 
@@ -36,6 +42,30 @@ object ApiService {
         return try {
             val response: ChallengeResponse = client.get("/api/challenge").body()
             Result.success(response.sessionId)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun login(payload: LoginPayload): Result<VerificationResponse> {
+        return try {
+            val response = client.post("/api/login") {
+                contentType(ContentType.Application.Json)
+                setBody(payload)
+            }
+            if (response.status.value in 200..299) {
+                // Reuse VerificationResponse as it contains success + userId + detail
+                Result.success(response.body())
+            } else {
+                 val errorBody = response.body<String>()
+                val detail = try {
+                    val match = "\"detail\"\\s*:\\s*\"([^\"]+)\"".toRegex().find(errorBody)
+                    match?.groupValues?.get(1) ?: errorBody
+                } catch (e: Exception) {
+                    errorBody
+                }
+                Result.failure(Exception(detail))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }

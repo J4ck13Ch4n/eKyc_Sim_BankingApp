@@ -14,3 +14,31 @@ Testing Enrollment against https://ekyc-backend-436637848640.asia-northeast1.run
 Status Code: 200
 Response: {"success":true,"userId":4}
 ✅ Enrollment SUCCESS!
+Testing Enrollment against https://ekyc-backend-436637848640.asia-northeast1.run.app...
+Status Code: 422
+Response: {"detail":[{"type":"missing","loc":["body","email"],"msg":"Field required","input":{"publicKey":"029feca55f85e1d4bb7966075245c44fd5853f458c4a5d24135d16b0cc3bf22143","commitment":"0340ffeb9e954aeb3642f1f7d56f4a161d9a3ce236d71f171f5a00f98fd627cecf","idNumberHash":"087a6f2c507fbc672c7f954425b377fd3bfd413a71caa8b73e5bdfb7d6401474","encryptedPII":"dummy_encrypted_data","proof":{"commitmentR":"0340ffeb9e954aeb3642f1f7d56f4a161d9a3ce236d71f171f5a00f98fd627cecf","challenge":"abe93c1bb55b7e8d1f307c8ae2887c8dbd3b9821d96a08c6415cf7656c60037d","response":"611b47529381c11f602cdff5e724f0bc4941ab5ac97dc1607cfe06e653f13086"},"timestamp":1765480924568,"fullNameHash":"9e95a89b42f1fb5a3ea9f8657ec45354a080b57b8ef2f6df85b73add1f756465","dobHash":"c5cc05628d64ef65fa81b1fb6ed9cb4bd5dd8bf94d95a4fb9c1540b5adac00ed","approval":1}},{"type":"missing","loc":["body","password"],"msg":"Field required","input":{"publicKey":"029feca55f85e1d4bb7966075245c44fd5853f458c4a5d24135d16b0cc3bf22143","commitment":"0340ffeb9e954aeb3642f1f7d56f4a161d9a3ce236d71f171f5a00f98fd627cecf","idNumberHash":"087a6f2c507fbc672c7f954425b377fd3bfd413a71caa8b73e5bdfb7d6401474","encryptedPII":"dummy_encrypted_data","proof":{"commitmentR":"0340ffeb9e954aeb3642f1f7d56f4a161d9a3ce236d71f171f5a00f98fd627cecf","challenge":"abe93c1bb55b7e8d1f307c8ae2887c8dbd3b9821d96a08c6415cf7656c60037d","response":"611b47529381c11f602cdff5e724f0bc4941ab5ac97dc1607cfe06e653f13086"},"timestamp":1765480924568,"fullNameHash":"9e95a89b42f1fb5a3ea9f8657ec45354a080b57b8ef2f6df85b73add1f756465","dobHash":"c5cc05628d64ef65fa81b1fb6ed9cb4bd5dd8bf94d95a4fb9c1540b5adac00ed","approval":1}}]}
+❌ Enrollment FAILED
+Testing Enrollment against https://ekyc-backend-436637848640.asia-northeast1.run.app...
+Status Code: 500
+Response: Internal Server Error
+❌ Enrollment FAILED
+Testing Enrollment against https://ekyc-backend-436637848640.asia-northeast1.run.app...
+Status Code: 500
+Response: Internal Server Error
+❌ Enrollment FAILED
+Testing Enrollment against https://ekyc-backend-436637848640.asia-northeast1.run.app...
+Status Code: 500
+Response: {"detail":"Enrollment Logic Error: password cannot be longer than 72 bytes, truncate manually if necessary (e.g. my_password[:72])"}
+❌ Enrollment FAILED
+Testing Enrollment against https://ekyc-backend-436637848640.asia-northeast1.run.app...
+Status Code: 500
+Response: {"detail":"Enrollment Logic Error: password cannot be longer than 72 bytes, truncate manually if necessary (e.g. my_password[:72])"}
+❌ Enrollment FAILED
+Testing Enrollment against https://ekyc-backend-436637848640.asia-northeast1.run.app...
+Status Code: 500
+Response: {"detail":"Enrollment Logic Error: password cannot be longer than 72 bytes, truncate manually if necessary (e.g. my_password[:72]). Pwd Len: 11"}
+❌ Enrollment FAILED
+Testing Enrollment against https://ekyc-backend-436637848640.asia-northeast1.run.app...
+Status Code: 200
+Response: {"success":true,"userId":1}
+✅ Enrollment SUCCESS!

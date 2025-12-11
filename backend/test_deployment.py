@@ -75,7 +75,9 @@ def create_enrollment_payload():
         "timestamp": timestamp,
         "fullNameHash": name_hash,
         "dobHash": dob_hash,
-        "approval": approval
+        "approval": approval,
+        "email": f"test_{uuid.uuid4()}@example.com",
+        "password": "password123"
     }
     
     return payload, id_hash

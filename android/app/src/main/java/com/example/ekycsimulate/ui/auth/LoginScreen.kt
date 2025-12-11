@@ -5,25 +5,25 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.example.ekycsimulate.zkp.ZKPEnrollmentManager
 import kotlinx.coroutines.launch
+import com.example.ekycsimulate.data.api.ApiService
+import com.example.ekycsimulate.data.api.LoginPayload
+import androidx.navigation.NavController
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Color
 
 @Composable
 fun LoginScreen(
-    onLoginSuccess: (Int) -> Unit // Returns User ID
+    navController: NavController,
+    onLoginSuccess: (Int) -> Unit
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val enrollmentManager = remember { ZKPEnrollmentManager(context) }
-    
-    var isEnrolled by remember { mutableStateOf(enrollmentManager.isEnrolled()) }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
-    var loginStatus by remember { mutableStateOf<String?>(null) }
-    var isError by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -33,84 +33,60 @@ fun LoginScreen(
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = "Đăng nhập ZKP",
+            text = "Đăng nhập",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
-        
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        if (!isEnrolled) {
-            Text(
-                text = "Bạn chưa đăng ký tài khoản ZKP trên thiết bị này.",
-                color = MaterialTheme.colorScheme.error
-            )
-        } else {
-            if (isLoading) {
-                CircularProgressIndicator()
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Đang xác thực...")
-            } else {
-                Button(
-                    onClick = {
-                        isLoading = true
-                        loginStatus = null
-                        isError = false
-                        
-                        scope.launch {
-                            try {
-                                // 1. Get Challenge from Server
-                                val challengeResult = enrollmentManager.getChallenge()
-                                
-                                challengeResult.onSuccess { sessionId ->
-                                    // 2. Generate Proof
-                                    val verificationPayload = enrollmentManager.performVerification(sessionId)
-                                    
-                                    if (verificationPayload != null) {
-                                        // 3. Send to Server
-                                        val verifyResult = enrollmentManager.sendVerification(verificationPayload, sessionId)
-                                        
-                                        verifyResult.onSuccess { response ->
-                                            isLoading = false
-                                            loginStatus = "Đăng nhập thành công! User ID: ${response.userId}"
-                                            isError = false
-                                            response.userId?.let { onLoginSuccess(it) }
-                                        }.onFailure { e ->
-                                            isLoading = false
-                                            loginStatus = "Lỗi xác thực: ${e.message}"
-                                            isError = true
-                                        }
-                                    } else {
-                                        isLoading = false
-                                        loginStatus = "Lỗi: Không thể tạo ZKP Proof (Private Key missing?)"
-                                        isError = true
-                                    }
-                                }.onFailure { e ->
-                                    isLoading = false
-                                    loginStatus = "Lỗi kết nối Server: ${e.message}"
-                                    isError = true
-                                }
-                            } catch (e: Exception) {
-                                isLoading = false
-                                loginStatus = "Lỗi không xác định: ${e.message}"
-                                isError = true
-                            }
+        OutlinedTextField(
+            value = email,
+            onValueChange = { email = it },
+            label = { Text("Email") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it },
+            label = { Text("Mật khẩu") },
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (errorMessage != null) {
+            Text(errorMessage!!, color = MaterialTheme.colorScheme.error)
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        Button(
+            onClick = {
+                if (email.isNotBlank() && password.isNotBlank()) {
+                    isLoading = true
+                    errorMessage = null
+                    scope.launch {
+                        val result = ApiService.login(LoginPayload(email, password))
+                        isLoading = false
+                        result.onSuccess {
+                            // Call callback with dummy ID or parsed ID
+                            // ApiService.login returns JSON, need to ensure we parse userId if needed
+                            // For now, assuming success logic handles it or we parse result body
+                             onLoginSuccess(it.userId ?: 0)
+                        }.onFailure { e ->
+                            errorMessage = e.message ?: "Đăng nhập thất bại"
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Đăng nhập bằng Face ID (ZKP)")
+                    }
                 }
-            }
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            loginStatus?.let {
-                Text(
-                    text = it,
-                    color = if (isError) MaterialTheme.colorScheme.error else Color(0xFF4CAF50),
-                    style = MaterialTheme.typography.bodyMedium
-                )
+            },
+            enabled = !isLoading,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+            } else {
+                Text("Đăng nhập")
             }
         }
     }

@@ -4,3 +4,4 @@ sqlalchemy
 ecdsa
 pydantic
 psycopg2-binary
+passlib[bcrypt]

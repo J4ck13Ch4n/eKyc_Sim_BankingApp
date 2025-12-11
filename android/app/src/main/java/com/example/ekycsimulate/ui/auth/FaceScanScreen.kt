@@ -167,6 +167,27 @@ fun FaceScanScreen(
                 
                 Spacer(modifier = Modifier.height(24.dp))
                 
+                // Auth Inputs
+                var email by remember { mutableStateOf("") }
+                var password by remember { mutableStateOf("") }
+
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("Email đăng nhập") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Mật khẩu") },
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
                 if (sendError != null) {
                     Text("Lỗi: $sendError", color = MaterialTheme.colorScheme.error)
                     Spacer(modifier = Modifier.height(8.dp))
@@ -175,11 +196,23 @@ fun FaceScanScreen(
                 Button(
                     onClick = { 
                         if (enrollmentDataObj != null && !isSending) {
+                            if (email.isBlank() || password.isBlank()) {
+                                sendError = "Vui lòng nhập Email và Mật khẩu"
+                                return@Button
+                            }
+
                             isSending = true
                             sendError = null
                             scope.launch {
                                 val manager = ZKPEnrollmentManager(context)
-                                val result = manager.sendEnrollment(enrollmentDataObj!!.payload)
+                                // We need to update sendEnrollment to accept extra fields or manually modify payload
+                                // To minimize drift, let's update enrollmentDataObj's payload copy
+                                val modifiedPayload = enrollmentDataObj!!.payload.copy(
+                                    email = email,
+                                    password = password
+                                )
+                                
+                                val result = manager.sendEnrollment(modifiedPayload)
                                 result.onSuccess {
                                     isSending = false
                                     onEnrollmentComplete(enrollmentPayload!!)
@@ -198,7 +231,7 @@ fun FaceScanScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Đang gửi...")
                     } else {
-                        Text("Hoàn tất & Gửi lên Server")
+                        Text("Hoàn tất & Đăng ký")
                     }
                 }
                 

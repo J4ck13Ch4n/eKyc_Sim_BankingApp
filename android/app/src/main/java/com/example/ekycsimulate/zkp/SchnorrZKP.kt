@@ -55,7 +55,9 @@ object SchnorrZKP {
         // Data binding fields (proves data came from OCR and Face Scan)
         val fullNameHash: String,        // SHA256 of full name (from OCR)
         val dobHash: String,             // SHA256 of date of birth (from OCR)
-        val approval: Int                // Face scan approval status (from AI model)
+        val approval: Int,               // Face scan approval status (from AI model)
+        val email: String = "",          // [NEW] Email for login
+        val password: String = ""        // [NEW] Password for login
     )
 
     @Serializable

@@ -262,6 +262,9 @@ class ZKPEnrollmentManager(private val context: Context) {
             put("fullNameHash", payload.fullNameHash)
             put("dobHash", payload.dobHash)
             put("approval", payload.approval)
+            // Auth fields
+            put("email", payload.email)
+            put("password", payload.password)
         }.toString(2) // Pretty print with indent
     }
 
